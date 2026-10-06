@@ -49,12 +49,15 @@ a logistic regression model for binary classification:
 import autograd.numpy as np
 from autograd import grad
 
+
 def sigmoid(x):
-    return 0.5 * (np.tanh(x / 2.) + 1)
+    return 0.5 * (np.tanh(x / 2.0) + 1)
+
 
 def logistic_predictions(weights, inputs):
     # Outputs probability of a label being true according to logistic model.
     return sigmoid(np.dot(inputs, weights))
+
 
 def training_loss(weights):
     # Training loss is the negative log-likelihood of the training labels.
@@ -62,11 +65,9 @@ def training_loss(weights):
     label_probabilities = preds * targets + (1 - preds) * (1 - targets)
     return -np.sum(np.log(label_probabilities))
 
+
 # Build a toy dataset.
-inputs = np.array([[0.52, 1.12,  0.77],
-                   [0.88, -1.08, 0.15],
-                   [0.52, 0.06, -1.30],
-                   [0.74, -2.49, 1.39]])
+inputs = np.array([[0.52, 1.12, 0.77], [0.88, -1.08, 0.15], [0.52, 0.06, -1.30], [0.74, -2.49, 1.39]])
 targets = np.array([True, True, False, True])
 
 # Define a function that returns gradients of training loss using Autograd.
@@ -135,6 +136,45 @@ The input can be a scalar, complex number, vector, tuple, a tuple of vectors, a 
 When using the `grad` function, the output must be a scalar, but the functions `elementwise_grad` and `jacobian` allow gradients of vectors.
 
 
+## Working with array-like containers, such as Xarray
+
+Autograd interoperates with array-like containers that implement NumPy's [`__array_ufunc__`](https://numpy.org/doc/stable/reference/arrays.classes.html#numpy.class.__array_ufunc__) protocol, such as [`xarray.DataArray`](https://docs.xarray.dev/en/stable/generated/xarray.DataArray.html).
+You don't need to do anything special. When a NumPy ufunc is applied to such a container that holds (or is multiplied by) values you're differentiating with respect to, the operation propagates through the container down to Autograd's wrapped primitives.
+
+This means you can write a plain `np.sin(data_array)` rather than reaching for a container-specific `xr.apply_ufunc(np.sin, data_array)`.
+
+Autograd has no dependency on Xarray (or any other such library) – it relies solely on the standard protocol, so the same approach works for any container that implements it.
+
+Here's a small example which uses named axes. The only thing to remember here is that `grad` needs a plain scalar output, so pull the underlying array back out (with `.data` for an `xarray.DataArray`) before the final reduction:
+
+```python
+import autograd.numpy as np
+from autograd import grad
+import xarray as xr
+
+# A named-axis dataset, with three features measured at four time steps.
+measurements = xr.DataArray(
+    np.array([[0.5, 1.2, -0.3], [0.1, 0.4, 0.9], [-0.7, 0.2, 1.1], [0.3, -0.5, 0.6]]),
+    dims=["time", "feature"],
+    coords={"feature": ["a", "b", "c"]},
+)
+
+
+def loss(weights):
+    # weights is what we differentiate with respect to. Broadcasting
+    # respects the named "feature" axis, and the boxed values ride
+    # along inside the DataArray.
+    scores = np.tanh(measurements * weights)
+    # Pull the plain array back out for the scalar reduction grad needs
+    return np.sum(scores.data**2)
+
+
+weights = np.array([0.5, -1.0, 2.0])
+print("loss:", loss(weights))
+print("grad:", grad(loss)(weights))
+```
+
+
 ## Supported and unsupported parts of numpy/scipy
 
 Numpy has [a lot of features](http://docs.scipy.org/doc/numpy/reference/). We've done our best to support most of them. So far, we've implemented gradients for:
@@ -196,6 +236,7 @@ Next, we define our function using standard Python, using `@primitive` as a deco
 ```python
 import autograd.numpy as np
 from autograd.extend import primitive, defvjp
+
 
 @primitive
 def logsumexp(x):
@@ -286,10 +327,12 @@ We define primitive vector-Jacobian products of complex functions like this
 def f_vjp(g, z):
     z_x, z_y = real(z), imag(z)
     g_x, g_y = real(g), imag(g)
-    return (       g_x * grad(u, 0)(x, y)
-             - i * g_x * grad(u, 1)(x, y)
-             -     g_y * grad(v, 0)(x, y)
-             + i * g_y * grad(v, 1)(x, y))
+    return (
+        g_x * grad(u, 0)(x, y)
+        - i * g_x * grad(u, 1)(x, y)
+        - g_y * grad(v, 0)(x, y)
+        + i * g_y * grad(v, 1)(x, y)
+    )
 ```
 
 For holomorphic primitives, this is just the regular complex derivative multiplied by `g`,
@@ -301,7 +344,7 @@ Chapter 4 of [Dougal's PhD thesis](https://dougalmaclaurin.com/phd-thesis.pdf)
 goes into a bit more detail about how we define the primitive vector-Jacobian products.
 
 ## Autograd Lecture
-For more information on automatic differentiation, autograd's implementation, and advanced automatic differentiation techniques, see a [talk by Matt at the Deep Learning Summer School, Montreal 2017](http://videolectures.net/deeplearning2017_johnson_automatic_differentiation/).
+For more information on automatic differentiation, autograd's implementation, and advanced automatic differentiation techniques, see a [talk by Matt at the Deep Learning Summer School, Montreal 2017](https://videolectures.net/videos/deeplearning2017_johnson_automatic_differentiation/).
 
 ## Support
 
